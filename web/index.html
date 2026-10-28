@@ -185,7 +185,7 @@
         </div>
         <div class="form-grid">
           <label class="field-label">节目标题
-            <input id="podcastTitle" type="text" maxlength="100" placeholder="默认使用文件名">
+            <input id="podcastTitle" type="text" maxlength="50" placeholder="默认使用文件名，最多 50 字">
           </label>
           <label class="field-label">节目简介
             <textarea id="podcastDesc" rows="3" maxlength="2000" placeholder="写一段本期介绍（建议填写；留空会用标题补全）"></textarea>
@@ -225,14 +225,17 @@
         <div class="card">
           <div class="card-kicker">STEP 01</div>
           <h3>连接官方平台</h3>
-          <p class="hint">需要开发者的 <code>appId</code>、<code>privateKey</code>，以及用户授权后得到的 <code>accessToken</code>。密钥仅用于本地内存会话，不写入服务器磁盘。</p>
+          <p class="hint">需要开发者的 <code>appId</code>、<code>privateKey</code>、<code>appSecret</code>，以及用户授权后得到的 <code>accessToken</code>。密钥仅用于本地内存会话，不写入服务器磁盘。</p>
           <label class="field-label">AppID
             <input id="officialAppId" type="text" placeholder="a301020000000000..." autocomplete="off" spellcheck="false">
           </label>
           <label class="field-label">privateKey
             <textarea id="officialPrivateKey" class="key-input" rows="3" placeholder="-----BEGIN PRIVATE KEY-----&#10;...&#10;-----END PRIVATE KEY-----" autocomplete="off" spellcheck="false"></textarea>
           </label>
-          <label class="field-label">accessToken
+          <label class="field-label">appSecret <span class="field-note">换取 accessToken 用</span>
+            <input id="officialAppSecret" type="password" placeholder="应用详情里的 appSecret" autocomplete="off">
+          </label>
+          <label class="field-label">accessToken <span class="field-note">用下方 code 获取后自动填入，也可手动粘贴</span>
             <span class="cookie-row">
               <input id="officialAccessToken" type="password" placeholder="用户授权 accessToken" autocomplete="off">
               <button class="icon-btn" type="button" id="toggleOfficialToken" aria-label="显示或隐藏 accessToken">
@@ -240,6 +243,19 @@
               </button>
             </span>
           </label>
+
+          <div class="token-exchange">
+            <div class="token-exchange-head">
+              <strong>没有 accessToken？</strong>
+              <span>用授权回调里的 code 换取</span>
+            </div>
+            <label class="field-label">授权 code
+              <input id="officialGrantCode" type="text" placeholder="H5 授权回调地址里的 code 参数" autocomplete="off" spellcheck="false">
+            </label>
+            <button class="btn btn-soft btn-block" type="button" id="officialExchangeBtn">用 code 获取 accessToken</button>
+            <p class="status-line" id="officialTokenStatus">code 一次性有效，通常 10 分钟内使用</p>
+          </div>
+
           <div class="official-connect-actions">
             <button class="btn btn-primary" type="button" id="officialConnectBtn">连接并读取播客</button>
             <button class="btn btn-ghost" type="button" id="officialClearBtn">清除会话</button>
@@ -249,10 +265,12 @@
             <summary>官方平台凭据怎么来？</summary>
             <ol>
               <li>在 <a href="https://developer.music.163.com/st/developer/" target="_blank" rel="noopener noreferrer">网易云开放平台</a> 完成开发者入驻并创建应用。</li>
-              <li>在应用详情获取 <code>appId</code> 和 <code>privateKey</code>，并确认已申请“播客相关能力”。</li>
-              <li>完成用户 H5 / 二维码授权后，用回调 code 换取 <code>accessToken</code>。</li>
-              <li>把三项填到上方。accessToken 会过期，失效后重新授权即可。</li>
+              <li>在应用详情获取 <code>appId</code>、<code>appSecret</code> 和 <code>privateKey</code>，并确认已申请“播客相关能力”。</li>
+              <li>打开 H5 授权页并完成登录授权，浏览器会跳转到你配置的回调地址，地址里带 <code>code=...</code>。</li>
+              <li>把该 code 填到「授权 code」，点“用 code 获取 accessToken”，然后连接。</li>
+              <li>也可直接粘贴已有 accessToken。accessToken 默认 7 天过期，失效后重新用 code 获取。</li>
             </ol>
+            <p class="hint">授权调试工具：<a href="https://st.music.163.com/g/oauth-tool" target="_blank" rel="noopener noreferrer">st.music.163.com/g/oauth-tool</a> · <a href="https://developer.music.163.com/st/developer/document?docId=2fa5a885d2644910a4b823dba0c5acf5" target="_blank" rel="noopener noreferrer">code 换 accessToken 文档</a></p>
             <p class="hint">仅读取你自己的播客与声音；播放/下载权限取决于开放平台账号、会员和接口组审批。</p>
           </details>
         </div>

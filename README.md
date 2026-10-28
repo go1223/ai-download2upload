@@ -60,6 +60,8 @@ python3 app.py
 4. 确认包含 `MUSIC_U` 和 `__csrf`，粘贴到「播客上传 → 网页 Cookie」。
 5. 点「读取我的播客」，选择目标播客，选择音频并上传。
 
+节目标题最多 50 字（超出会自动截断），避免网易云 preCheck 因名称过长拒绝。
+
 关闭「上传后自动发布」时，节目会以私密/未发布状态提交，可稍后到网易云创作中心检查并发布。
 Cookie 只保存在当前浏览器的 `localStorage`；换浏览器或清除站点数据后需要重新粘贴。
 
@@ -68,18 +70,21 @@ Cookie 只保存在当前浏览器的 `localStorage`；换浏览器或清除站�
 官方平台页签使用网易云音乐开放平台 OpenAPI，需要开发者凭据，和上面的 Cookie 模式是两套独立通道：
 
 1. 在 [网易云音乐开放平台](https://developer.music.163.com/st/developer/) 完成入驻并创建应用。
-2. 在应用详情获取 `appId`、`privateKey`，并确认应用已申请 **“播客相关能力”** 接口组。
-3. 完成用户 H5 / 二维码授权，用回调 `code` 换取 `accessToken`。
-4. 在「官方平台」填入三项，连接后会读取 `/openapi/podcast/my/created/voicelist` 返回的播客。
-5. 选择播客即可加载 `/openapi/voice/fall/list` 的声音；播放时调用 `/openapi/podcast/play/url/get/v1` 获取音频地址。
+2. 在应用详情获取 `appId`、`appSecret`、`privateKey`，并确认应用已申请 **“播客相关能力”** 接口组。
+3. 在控制台配置 H5 授权回调地址，打开 H5 授权页完成登录授权；回调地址会带上 `code=...`。
+4. 在「官方平台」填 `appId / appSecret / privateKey`，把回调里的 `code` 填到「授权 code」，点 **“用 code 获取 accessToken”**。
+5. accessToken 会自动填入并尝试连接，读取 `/openapi/podcast/my/created/voicelist` 返回的播客。
+6. 选择播客即可加载 `/openapi/voice/fall/list` 的声音；播放时调用 `/openapi/podcast/play/url/get/v1` 获取音频地址。
+
+也可以跳过 code，直接粘贴已有的 accessToken，再点“连接并读取播客”。
 
 说明：
 
 - 官方平台模式只做**读取、试听、下载**，不替代 02 的 Cookie 上传。
+- `code` 是一次性授权码，通常 10 分钟内有效；accessToken 默认约 7 天过期。
 - 音频通过本机 `/api/official/audio` 代理播放，支持 Range/拖动进度条；下载也走同一代理。
 - 非会员/未购买内容可能只返回 `TRIAL_URL` 试听片段，页面会显示“试听片段”。
-- 私钥和 accessToken 只在服务端内存会话中使用，不写入 `data/jobs.json`；服务重启或 4 小时会话过期后需要重新连接。
-- accessToken 失效时，重新走官方授权流程获取即可。
+- 私钥、appSecret、accessToken 只在服务端内存会话中使用，不写入 `data/jobs.json`；服务重启或 4 小时会话过期后需要重新连接。
 
 ## B 站预览
 

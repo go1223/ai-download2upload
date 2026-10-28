@@ -489,6 +489,43 @@
     }
   }
 
+  async function exchangeOfficialToken() {
+    const appId = $("#officialAppId").value.trim();
+    const appSecret = $("#officialAppSecret").value.trim();
+    const grantCode = $("#officialGrantCode").value.trim();
+    const status = $("#officialTokenStatus");
+    if (!appId || !appSecret || !grantCode) {
+      toast("请填写 AppID、appSecret 和授权 code", "error");
+      return;
+    }
+    $("#officialExchangeBtn").disabled = true;
+    $("#officialExchangeBtn").textContent = "获取中…";
+    status.className = "status-line";
+    status.textContent = "正在用授权 code 换取 accessToken…";
+    try {
+      const data = await api("/api/official/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appId, appSecret, grantCode }),
+      });
+      $("#officialAccessToken").value = data.accessToken;
+      $("#officialGrantCode").value = "";
+      const expire = Number(data.expireIn);
+      const expireText = expire > 0 ? `，有效期约 ${Math.round(expire / 86400)} 天` : "";
+      status.className = "status-line is-ok";
+      status.textContent = `accessToken 已获取${expireText}`;
+      toast("accessToken 已获取", "ok");
+      await connectOfficial();
+    } catch (error) {
+      status.className = "status-line is-error";
+      status.textContent = error.message;
+      toast(error.message, "error");
+    } finally {
+      $("#officialExchangeBtn").disabled = false;
+      $("#officialExchangeBtn").textContent = "用 code 获取 accessToken";
+    }
+  }
+
   async function connectOfficial() {
     const appId = $("#officialAppId").value.trim();
     const privateKey = $("#officialPrivateKey").value.trim();
@@ -708,7 +745,7 @@
     zone.classList.add("has-file");
     zone.querySelector("p").innerHTML = `<b>${esc(file.name)}</b>`;
     $("#fileHint").textContent = `${fmtBytes(file.size)} · ${suffix.replace(".", "").toUpperCase() || "AUDIO"}`;
-    const autoTitle = file.name.replace(/\.[^.]+$/, "").slice(0, 100);
+    const autoTitle = file.name.replace(/\.[^.]+$/, "").slice(0, 50);
     const titleInput = $("#podcastTitle");
     if (!titleInput.value.trim() || titleInput.value === state.titleAuto) {
       titleInput.value = autoTitle;
@@ -874,10 +911,15 @@
     });
 
     $("#officialConnectBtn").addEventListener("click", connectOfficial);
+    $("#officialExchangeBtn").addEventListener("click", exchangeOfficialToken);
     $("#officialClearBtn").addEventListener("click", () => {
       clearOfficialSession();
+      $("#officialAppSecret").value = "";
+      $("#officialGrantCode").value = "";
       $("#officialPrivateKey").value = "";
       $("#officialAccessToken").value = "";
+      $("#officialTokenStatus").className = "status-line";
+      $("#officialTokenStatus").textContent = "code 一次性有效，通常 10 分钟内使用";
       closeOfficialPlayer();
       setOfficialStatus("已清除官方平台会话");
     });

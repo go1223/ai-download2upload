@@ -975,6 +975,46 @@ def official_request(path: str, biz: dict, creds: dict, method: str = "GET") -> 
     return result.get("data") or {}
 
 
+def official_exchange_token(app_id: str, app_secret: str, grant_code: str) -> dict:
+    app_id = (app_id or "").strip()
+    app_secret = (app_secret or "").strip()
+    grant_code = (grant_code or "").strip()
+    if not app_id or not app_secret or not grant_code:
+        raise AppError("换取 accessToken 需要 appId、appSecret 和授权 code")
+    params = {
+        "appId": app_id,
+        "appSecret": app_secret,
+        "signType": "RSA_SHA256",
+        "timestamp": str(int(time.time() * 1000)),
+        "device": OFFICIAL_DEVICE,
+        "bizContent": json.dumps({"grantCode": grant_code}, ensure_ascii=False, separators=(",", ":")),
+    }
+    try:
+        response = requests.get(
+            NETEASE_OPENAPI + "/openapi/music/basic/user/oauth2/token/get/v2",
+            params=params,
+            headers={"User-Agent": UA, "Referer": "https://developer.music.163.com/"},
+            timeout=60,
+        )
+        result = response.json()
+    except requests.RequestException as exc:
+        raise AppError(f"获取 accessToken 失败：{exc}") from exc
+    except ValueError as exc:
+        raise AppError("获取 accessToken 返回异常，请检查 appId/appSecret") from exc
+    if str(result.get("code")) != "200":
+        message = result.get("message") or result.get("msg") or result.get("error") or f"错误码 {result.get('code')}"
+        raise AppError(f"获取 accessToken 失败：{message}")
+    data = result.get("data") or {}
+    token = data.get("accessToken")
+    if not token:
+        raise AppError("官方平台没有返回 accessToken，请检查授权 code 是否过期")
+    return {
+        "accessToken": token,
+        "refreshToken": data.get("refreshToken") or "",
+        "expireIn": data.get("expireIn") or data.get("expiresTime") or "",
+    }
+
+
 def _normalize_official_podcast(row: dict) -> dict | None:
     podcast_id = row.get("id") or row.get("podcastId")
     if not podcast_id:
@@ -1282,8 +1322,8 @@ def upload_podcast():
     title = (request.args.get("title") or "").strip()
     if not title:
         raise AppError("请填写节目标题")
-    if len(title) > 100:
-        raise AppError("节目标题不能超过 100 个字符")
+    # 网易云声音名称上限为 50 字；超长会被 preCheck 拒绝，这里主动截断。
+    title = title[:50]
     description = (request.args.get("description") or "").strip()[:2000]
     filename = (request.args.get("filename") or "audio.mp3").strip()
     suffix = Path(filename).suffix.lower()
@@ -1331,6 +1371,18 @@ def upload_podcast():
     store.update(job["id"], **extra)
     threading.Thread(target=netease_upload_worker, args=(job["id"], cookie), daemon=True).start()
     return jsonify(public_job(store.get(job["id"]))), 202
+
+
+@app.post("/api/official/token")
+def official_token_route():
+    body = request.get_json(silent=True) or {}
+    return jsonify(
+        official_exchange_token(
+            body.get("appId", ""),
+            body.get("appSecret", ""),
+            body.get("grantCode", ""),
+        )
+    )
 
 
 @app.post("/api/official/connect")

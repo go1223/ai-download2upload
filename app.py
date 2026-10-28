@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""声取 MediaDock — 本地媒体下载与网易云播客上传服务。"""
+"""声取 MediaDock — 本地媒体下载、播客上传与官方平台播客浏览。"""
 from __future__ import annotations
 
 import base64
@@ -18,14 +18,17 @@ import uuid
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 from xml.sax.saxutils import escape as xml_escape
 
 import requests
 import yt_dlp
 from Crypto.Cipher import AES
+from Crypto.Hash import SHA256
+from Crypto.PublicKey import RSA
+from Crypto.Signature import pkcs1_15
 from Crypto.Util.Padding import pad
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory, stream_with_context
 from werkzeug.exceptions import HTTPException
 
 BASE = Path(__file__).resolve().parent
@@ -46,6 +49,25 @@ UA = (
 BILI_SEARCH_API = "https://api.bilibili.com/x/web-interface/search/type"
 NETEASE_NOS = "https://ymusic.nos-hz.163yun.com"
 NETEASE_WEAPI = "https://interface.music.163.com/weapi"
+NETEASE_OPENAPI = "https://openapi.music.163.com"
+OFFICIAL_DEVICE = json.dumps(
+    {
+        "deviceType": "openapi",
+        "os": "openapi",
+        "appVer": "0.1",
+        "channel": "mediadock",
+        "model": "local",
+        "deviceId": "mediadock-local",
+        "brand": "mediadock",
+        "osVer": "1.0",
+        "clientIp": "192.168.0.1",
+    },
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
+OFFICIAL_SESSIONS: dict[str, dict] = {}
+OFFICIAL_LOCK = threading.RLock()
+OFFICIAL_TTL = 4 * 60 * 60
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
@@ -632,6 +654,18 @@ def netease_podcasts(cookie: str) -> list[dict]:
     return podcasts
 
 
+def netease_podcast_detail(cookie: str, voice_list_id: str) -> dict:
+    result = weapi_post(
+        "/voice/workbench/voicelist/detail",
+        {"id": str(voice_list_id)},
+        cookie,
+    )
+    data = result.get("data") or {}
+    if isinstance(data.get("data"), dict):
+        data = data["data"]
+    return data if isinstance(data, dict) else {}
+
+
 def _nos_upload(session: requests.Session, token_data: dict, file_path: Path, progress) -> None:
     object_key = str(token_data["objectKey"]).replace("/", "%2F")
     token = token_data["token"]
@@ -693,13 +727,14 @@ def _voice_payload(job: dict, token_data: dict, auto_publish: bool) -> dict:
         "name": job["title"],
         "autoPublish": auto_publish,
         "autoPublishText": "",
-        "description": job.get("description") or "",
+        "description": job.get("description") or job["title"],
         "voiceListId": str(job["voice_list_id"]),
         "dfsId": token_data.get("docId"),
         "composedSongs": [],
         "privacy": not auto_publish,
         "publishTime": 0,
         "orderNo": 1,
+        "serialNum": 1,
     }
     for key in ("coverImgId", "categoryId", "secondCategoryId"):
         value = job.get(key)
@@ -717,6 +752,22 @@ def netease_upload_worker(job_id: str, cookie: str) -> None:
     try:
         store.update(job_id, status="running", stage="准备音频", progress=3)
         cookie = normalize_cookie(cookie)
+        if not job.get("coverImgId"):
+            try:
+                detail = netease_podcast_detail(cookie, job["voice_list_id"])
+                detail_source = detail.get("podcast") if isinstance(detail.get("podcast"), dict) else detail
+                updates = {}
+                for key in ("coverImgId", "categoryId", "secondCategoryId"):
+                    value = detail_source.get(key) if isinstance(detail_source, dict) else None
+                    if key == "coverImgId" and not value:
+                        value = detail_source.get("coverImgIdStr") if isinstance(detail_source, dict) else None
+                    if value not in (None, ""):
+                        updates[key] = value
+                if updates:
+                    store.update(job_id, **updates)
+                    job.update(updates)
+            except Exception:
+                pass
         if source.suffix.lower() not in {".mp3", ".flac"}:
             ffdir = ffmpeg_dir()
             if not ffdir:
@@ -836,6 +887,224 @@ def weapi_post_with_headers(path: str, payload: dict, cookie: str, extra_headers
     if result.get("code") != 200:
         raise AppError(f"网易云接口错误：{result.get('msg') or result.get('message') or result.get('code')}")
     return result
+
+
+# ---------------------------------------------------------------------------
+# 网易云开放平台（OpenAPI）
+# ---------------------------------------------------------------------------
+def _prune_official_sessions():
+    now = time.time()
+    for sid in list(OFFICIAL_SESSIONS):
+        if now - OFFICIAL_SESSIONS[sid]["created"] > OFFICIAL_TTL:
+            OFFICIAL_SESSIONS.pop(sid, None)
+
+
+def _official_session(sid: str) -> dict:
+    with OFFICIAL_LOCK:
+        _prune_official_sessions()
+        session = OFFICIAL_SESSIONS.get((sid or "").strip())
+    if not session:
+        raise AppError("官方平台会话已过期，请重新连接", 401)
+    return session
+
+
+def _private_key(raw: str):
+    raw = (raw or "").strip()
+    if not raw:
+        raise AppError("请填写开放平台 privateKey")
+    if "BEGIN" in raw:
+        candidates = [raw]
+    else:
+        compact = re.sub(r"\s+", "", raw)
+        if len(compact) < 100:
+            raise AppError("privateKey 格式不正确")
+        wrapped = "\n".join(compact[i:i + 64] for i in range(0, len(compact), 64))
+        candidates = [
+            f"-----BEGIN PRIVATE KEY-----\n{wrapped}\n-----END PRIVATE KEY-----",
+            f"-----BEGIN RSA PRIVATE KEY-----\n{wrapped}\n-----END RSA PRIVATE KEY-----",
+        ]
+    for candidate in candidates:
+        try:
+            return RSA.import_key(candidate)
+        except Exception:
+            continue
+    raise AppError("privateKey 无法解析，请确认是 PKCS#8/PKCS#1 RSA 私钥")
+
+
+def _official_params(creds: dict, biz: dict) -> dict:
+    params = {
+        "appId": str(creds["appId"]).strip(),
+        "accessToken": str(creds["accessToken"]).strip(),
+        "timestamp": str(int(time.time() * 1000)),
+        "signType": "RSA_SHA256",
+        "device": OFFICIAL_DEVICE,
+        "bizContent": json.dumps(biz, ensure_ascii=False, separators=(",", ":")),
+    }
+    if not params["appId"] or not params["accessToken"]:
+        raise AppError("请填写 appId 和 accessToken")
+    content = "&".join(
+        f"{key}={str(value).lower() if isinstance(value, bool) else value}"
+        for key, value in sorted(params.items())
+        if value is not None and value != ""
+    )
+    key = _private_key(creds["privateKey"])
+    signature = pkcs1_15.new(key).sign(SHA256.new(content.encode("utf-8")))
+    params["sign"] = base64.b64encode(signature).decode("ascii")
+    return params
+
+
+def official_request(path: str, biz: dict, creds: dict, method: str = "GET") -> dict:
+    params = _official_params(creds, biz)
+    headers = {"User-Agent": UA, "Referer": "https://developer.music.163.com/"}
+    try:
+        if method.upper() == "POST":
+            response = requests.post(NETEASE_OPENAPI + path, params=params, headers=headers, timeout=60)
+        else:
+            response = requests.get(NETEASE_OPENAPI + path, params=params, headers=headers, timeout=60)
+        result = response.json()
+    except requests.RequestException as exc:
+        raise AppError(f"官方平台请求失败：{exc}") from exc
+    except ValueError as exc:
+        raise AppError("官方平台返回异常，请检查应用权限或 accessToken") from exc
+    code = result.get("code")
+    if str(code) != "200":
+        message = result.get("message") or result.get("msg") or result.get("error") or f"错误码 {code}"
+        if str(code) in {"301", "401", "403"}:
+            raise AppError(f"官方平台授权失败：{message}", 401)
+        raise AppError(f"官方平台接口错误：{message}")
+    return result.get("data") or {}
+
+
+def _normalize_official_podcast(row: dict) -> dict | None:
+    podcast_id = row.get("id") or row.get("podcastId")
+    if not podcast_id:
+        return None
+    cover = row.get("picUrl") or row.get("coverUrl") or ""
+    if cover.startswith("http://"):
+        cover = "https://" + cover[7:]
+    return {
+        "voiceListId": str(podcast_id),
+        "name": row.get("name") or "未命名播客",
+        "cover": cover if cover.startswith(("http://", "https://")) else "",
+        "voiceCount": row.get("programCount") or row.get("voiceCount") or 0,
+        "description": re.sub(r"<[^>]+>", "", row.get("desc") or "")[:300],
+        "categoryId": row.get("categoryId") or "",
+        "secondCategoryId": row.get("secondCategoryId") or "",
+        "coverImgId": "",
+    }
+
+
+def official_connect(app_id: str, private_key: str, access_token: str) -> dict:
+    creds = {
+        "appId": (app_id or "").strip(),
+        "privateKey": private_key or "",
+        "accessToken": (access_token or "").strip(),
+    }
+    if not creds["appId"] or not creds["accessToken"]:
+        raise AppError("请填写 appId、privateKey 和 accessToken")
+    data = official_request(
+        "/openapi/podcast/my/created/voicelist",
+        {"limit": 50},
+        creds,
+    )
+    rows = data.get("records") or data.get("list") or []
+    podcasts = [p for p in (_normalize_official_podcast(x) for x in rows) if p]
+    sid = uuid.uuid4().hex
+    with OFFICIAL_LOCK:
+        _prune_official_sessions()
+        OFFICIAL_SESSIONS[sid] = {"creds": creds, "created": time.time()}
+    return {"sid": sid, "podcasts": podcasts}
+
+
+def official_podcasts(sid: str) -> list[dict]:
+    session = _official_session(sid)
+    data = official_request(
+        "/openapi/podcast/my/created/voicelist",
+        {"limit": 50},
+        session["creds"],
+    )
+    rows = data.get("records") or data.get("list") or []
+    return [p for p in (_normalize_official_podcast(x) for x in rows) if p]
+
+
+def official_voices(sid: str, radio_id: str, cursor: str = "") -> dict:
+    session = _official_session(sid)
+    page = json.dumps({"size": 30, "cursor": cursor or ""}, ensure_ascii=False, separators=(",", ":"))
+    data = official_request(
+        "/openapi/voice/fall/list",
+        {
+            "radioId": str(radio_id),
+            "page": page,
+            "asc": "false",
+            "type": "0",
+            "isRangeTarget": "false",
+        },
+        session["creds"],
+    )
+    voices = []
+    for row in data.get("records") or []:
+        voice_id = row.get("id")
+        if not voice_id:
+            continue
+        cover = row.get("coverUrl") or (row.get("djradio") or {}).get("picUrl") or ""
+        if cover.startswith("http://"):
+            cover = "https://" + cover[7:]
+        voices.append(
+            {
+                "id": str(voice_id),
+                "name": row.get("name") or "未命名声音",
+                "cover": cover if cover.startswith(("http://", "https://")) else "",
+                "duration": round((row.get("duration") or 0) / 1000),
+                "playCount": row.get("playCount") or 0,
+                "description": re.sub(r"<[^>]+>", "", row.get("description") or "")[:300],
+                "playable": not bool(row.get("playFlag")),
+                "playFlag": row.get("playFlag") or "",
+                "podcastId": str(row.get("podcastId") or radio_id),
+            }
+        )
+    down = data.get("downFallsPage") or {}
+    return {
+        "voices": voices,
+        "cursor": down.get("cursor") or "",
+        "more": bool(down.get("more")),
+    }
+
+
+def official_play(sid: str, voice_id: str, title: str = "") -> dict:
+    session = _official_session(sid)
+    data = official_request(
+        "/openapi/podcast/play/url/get/v1",
+        {"resourceId": str(voice_id), "resourceType": "VOICE"},
+        session["creds"],
+        method="POST",
+    )
+    remote_url = data.get("url") or ""
+    if not remote_url:
+        raise AppError("该声音暂不可播放（可能无版权、未登录或需要付费）")
+    filename = f"{safe_filename(title or f'voice-{voice_id}')}.mp3"
+    proxy_query = urlencode({"sid": sid, "url": remote_url, "filename": filename, "download": "1"})
+    return {
+        "url": remote_url,
+        "stream_url": "/api/official/audio?" + urlencode(
+            {"sid": sid, "url": remote_url, "filename": filename}
+        ),
+        "download_url": "/api/official/audio?" + proxy_query,
+        "filename": filename,
+        "size": data.get("size") or 0,
+        "type": data.get("type") or "",
+        "trial": data.get("freeTrialInfo"),
+    }
+
+
+def _allowed_media_url(raw: str) -> str:
+    parsed = urlparse((raw or "").strip())
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"}:
+        raise AppError("音频地址无效")
+    allowed = ("music.126.net", "music.163.com", "163yun.com", "127.net")
+    if not any(host == domain or host.endswith("." + domain) for domain in allowed):
+        raise AppError("音频地址不在网易云 CDN 白名单内")
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -1062,6 +1331,111 @@ def upload_podcast():
     store.update(job["id"], **extra)
     threading.Thread(target=netease_upload_worker, args=(job["id"], cookie), daemon=True).start()
     return jsonify(public_job(store.get(job["id"]))), 202
+
+
+@app.post("/api/official/connect")
+def official_connect_route():
+    body = request.get_json(silent=True) or {}
+    return jsonify(
+        official_connect(
+            body.get("appId", ""),
+            body.get("privateKey", ""),
+            body.get("accessToken", ""),
+        )
+    )
+
+
+@app.post("/api/official/podcasts")
+def official_podcasts_route():
+    body = request.get_json(silent=True) or {}
+    sid = body.get("sid", "")
+    return jsonify({"podcasts": official_podcasts(sid)})
+
+
+@app.post("/api/official/voices")
+def official_voices_route():
+    body = request.get_json(silent=True) or {}
+    radio_id = str(body.get("radioId") or "").strip()
+    if not radio_id:
+        raise AppError("请选择官方平台播客")
+    return jsonify(official_voices(body.get("sid", ""), radio_id, str(body.get("cursor") or "")))
+
+
+@app.post("/api/official/play")
+def official_play_route():
+    body = request.get_json(silent=True) or {}
+    voice_id = str(body.get("voiceId") or "").strip()
+    if not voice_id:
+        raise AppError("请选择声音")
+    return jsonify(
+        official_play(
+            body.get("sid", ""),
+            voice_id,
+            str(body.get("title") or ""),
+        )
+    )
+
+
+@app.get("/api/official/audio")
+def official_audio():
+    sid = request.args.get("sid", "")
+    _official_session(sid)
+    remote_url = _allowed_media_url(request.args.get("url", ""))
+    filename = safe_filename(request.args.get("filename") or "audio.mp3", 100)
+    if not filename.lower().endswith((".mp3", ".m4a", ".aac", ".flac", ".wav")):
+        filename += ".mp3"
+
+    headers = {"User-Agent": UA, "Referer": "https://music.163.com/", "Accept": "*/*"}
+    range_header = request.headers.get("Range")
+    if range_header:
+        headers["Range"] = range_header
+    try:
+        upstream = requests.get(
+            remote_url,
+            headers=headers,
+            stream=True,
+            timeout=(30, 120),
+            allow_redirects=True,
+        )
+    except requests.RequestException as exc:
+        raise AppError(f"音频获取失败：{exc}") from exc
+    if upstream.status_code not in {200, 206}:
+        upstream.close()
+        raise AppError(f"音频获取失败（上游 HTTP {upstream.status_code}）", 502)
+    try:
+        _allowed_media_url(upstream.url)
+    except AppError:
+        upstream.close()
+        raise
+
+    out_headers = {
+        "Content-Type": upstream.headers.get("Content-Type") or "audio/mpeg",
+        "Accept-Ranges": upstream.headers.get("Accept-Ranges", "bytes"),
+        "Cache-Control": "no-store",
+    }
+    for name in ("Content-Length", "Content-Range", "ETag", "Last-Modified"):
+        value = upstream.headers.get(name)
+        if value:
+            out_headers[name] = value
+    disposition = "attachment" if request.args.get("download") == "1" else "inline"
+    fallback = re.sub(r"[^\x20-\x7e]", "_", filename) or "audio.mp3"
+    out_headers["Content-Disposition"] = (
+        f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename)}"
+    )
+
+    def generate():
+        try:
+            for chunk in upstream.iter_content(64 * 1024):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    return Response(
+        stream_with_context(generate()),
+        status=upstream.status_code,
+        headers=out_headers,
+    )
 
 
 def local_ip() -> str:

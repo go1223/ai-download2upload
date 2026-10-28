@@ -7,6 +7,8 @@ __pycache__/
 .pip-tmp/
 .home/
 research/
+.edge-cdp*/
+.tmp-*
 downloads/
 uploads/
 data/jobs.json

@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+.vendor/
+.npm-cache/
+.pip-cache/
+.pip-tmp/
+.home/
+research/
+downloads/
+uploads/
+data/jobs.json
+bin/ffmpeg.exe
+bin/ffprobe.exe

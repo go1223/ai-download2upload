@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0f0d">
+  <meta name="description" content="本地媒体下载与网易云播客上传工作台，支持手机和平板。">
+  <title>声取 MediaDock · 下载与播客上传</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <div class="bg-orb bg-orb-a"></div>
+  <div class="bg-orb bg-orb-b"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="声取 MediaDock 首页">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none"><path d="M4 18v-4M9 23V9M14 26V6M19 21V11M24 24V8M29 17v-2" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      </span>
+      <span class="brand-text">声取 <em>MediaDock</em></span>
+    </a>
+    <div class="topbar-right">
+      <span class="env-pill" id="envPill"><i></i><span>检测环境</span></span>
+      <a class="ghost-link" href="#help">使用说明</a>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero" aria-labelledby="heroTitle">
+      <div class="eyebrow"><span class="eyebrow-dot"></span> LOCAL MEDIA STUDIO · 本地运行</div>
+      <h1 id="heroTitle">一处下载，<br><span>一键上播。</span></h1>
+      <p class="hero-sub">搜索 B 站、粘贴多平台链接，视频合成为 MP4，音频提取为 MP3。<br class="desktop-only">再把声音直接送进你的网易云播客。</p>
+      <div class="hero-tags" aria-label="功能标签">
+        <span>B站搜索</span><span>MP4 合并</span><span>MP3 提取</span><span>网易云播客</span><span>yt-dlp 多平台</span>
+      </div>
+    </section>
+
+    <nav class="tabbar" aria-label="功能切换">
+      <button class="tab is-active" data-tab="download" type="button"><span class="tab-index">01</span> 下载工坊</button>
+      <button class="tab" data-tab="upload" type="button"><span class="tab-index">02</span> 播客上传</button>
+      <span class="tab-indicator" aria-hidden="true"></span>
+    </nav>
+
+    <section class="tab-panel" id="tab-download">
+      <div class="panel-head">
+        <div>
+          <h2>视频 / 音频下载</h2>
+          <p>搜索后一键选择格式，或直接粘贴链接。</p>
+        </div>
+        <div class="segmented" id="sourceMode" role="tablist" aria-label="输入方式">
+          <button type="button" class="is-active" data-source="search">B站搜索</button>
+          <button type="button" data-source="link">链接下载</button>
+        </div>
+      </div>
+
+      <div class="card search-card" id="searchPane">
+        <form class="search-row" id="searchForm">
+          <label class="search-field">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m16.5 16.5 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <input id="searchInput" type="search" placeholder="搜索 B 站视频，例如：猫 meme、AI 教程" autocomplete="off" enterkeyhint="search">
+          </label>
+          <button class="btn btn-primary" type="submit" id="searchBtn">搜索</button>
+        </form>
+        <div class="chips" aria-label="示例关键词">
+          <span>试试</span>
+          <button type="button" data-query="猫 meme">猫 meme</button>
+          <button type="button" data-query="AI 教程">AI 教程</button>
+          <button type="button" data-query="音乐现场">音乐现场</button>
+        </div>
+        <details class="advanced">
+          <summary>高级设置 · B 站 Cookie <span>可选</span></summary>
+          <p class="hint">登录后复制 Cookie，可提升风控通过率并获取更高画质。Cookie 只保存在本机浏览器。</p>
+          <div class="cookie-row">
+            <input id="biliCookie" type="password" placeholder="SESSDATA=...; bili_jct=..." autocomplete="off">
+            <button class="icon-btn" type="button" id="toggleBiliCookie" aria-label="显示或隐藏 B 站 Cookie">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.6"/></svg>
+            </button>
+          </div>
+        </details>
+      </div>
+
+      <div class="card search-card" id="linkPane" hidden>
+        <form id="linkForm">
+          <label class="field-label" for="linkInput">视频 / 音频链接</label>
+          <div class="search-row">
+            <label class="search-field">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5M7.8 16.2l-1 1a3.9 3.9 0 0 1-5.5-5.5l3.2-3.2a3.9 3.9 0 0 1 5.5 0M16.2 7.8l1-1a3.9 3.9 0 1 1 5.5 5.5l-3.2 3.2a3.9 3.9 0 0 1-5.5 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              <input id="linkInput" type="url" placeholder="粘贴 B站 / YouTube / TikTok / X 链接，或 BV 号" autocomplete="off">
+            </label>
+            <button class="btn btn-ghost" type="button" id="inspectBtn">解析</button>
+          </div>
+          <div class="link-actions">
+            <button class="btn btn-primary" type="button" id="linkVideoBtn">
+              <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.7"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor"/></svg>
+              下载 MP4 视频
+            </button>
+            <button class="btn btn-soft" type="button" id="linkAudioBtn">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M9 18V6l9-2v12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="7" cy="18" r="2.4" stroke="currentColor" stroke-width="1.7"/><circle cx="16" cy="16" r="2.4" stroke="currentColor" stroke-width="1.7"/></svg>
+              提取 MP3 音频
+            </button>
+          </div>
+          <div class="preview" id="linkPreview" hidden></div>
+          <p class="hint">视频会自动合并原视频轨与音频轨；音频使用 ffmpeg 转为 MP3。支持 yt-dlp 可解析的平台。</p>
+        </form>
+      </div>
+
+      <div class="results-head" id="resultsHead" hidden>
+        <div><h3>搜索结果</h3><p id="resultMeta"></p></div>
+        <div class="pager" id="pager">
+          <button type="button" class="icon-btn" id="prevPage" aria-label="上一页">‹</button>
+          <span id="pageLabel">1 / 1</span>
+          <button type="button" class="icon-btn" id="nextPage" aria-label="下一页">›</button>
+        </div>
+      </div>
+      <div class="result-grid" id="searchResults"></div>
+
+      <section class="jobs-block" aria-labelledby="downloadJobsTitle">
+        <div class="section-title">
+          <h3 id="downloadJobsTitle">下载任务</h3>
+          <span class="count-pill" id="downloadJobCount">0</span>
+        </div>
+        <div class="job-list" id="downloadJobs"><div class="empty">还没有任务。搜索一个视频，或粘贴链接开始。</div></div>
+      </section>
+    </section>
+
+    <section class="tab-panel" id="tab-upload" hidden>
+      <div class="panel-head">
+        <div>
+          <h2>上传到网易云播客</h2>
+          <p>读取你的播客列表，选择音频与目标播客，一次完成。</p>
+        </div>
+        <span class="secure-badge"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3 5 6v5c0 4.6 3 8 7 10 4-2 7-5.4 7-10V6l-7-3Z" stroke="currentColor" stroke-width="1.7"/><path d="m9.5 12 1.8 1.8 3.7-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> Cookie 仅存本机</span>
+      </div>
+
+      <div class="upload-grid">
+        <div class="card">
+          <div class="card-kicker">STEP 01</div>
+          <h3>连接网易云</h3>
+          <p class="hint">需要已开通播客/主播权限的账号。Cookie 仅保存在浏览器 localStorage，不上传服务器磁盘。</p>
+          <label class="field-label" for="neteaseCookie">网页 Cookie</label>
+          <div class="cookie-row">
+            <input id="neteaseCookie" type="password" placeholder="MUSIC_U=...; __csrf=..." autocomplete="off">
+            <button class="icon-btn" type="button" id="toggleNeteaseCookie" aria-label="显示或隐藏网易云 Cookie">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.6"/></svg>
+            </button>
+          </div>
+          <button class="btn btn-primary btn-block" type="button" id="connectBtn">读取我的播客</button>
+          <p class="status-line" id="neteaseStatus">尚未连接</p>
+          <details class="cookie-help">
+            <summary>怎么获取 Cookie？</summary>
+            <ol>
+              <li>在浏览器打开 <a href="https://music.163.com/" target="_blank" rel="noopener noreferrer">music.163.com</a> 并登录。</li>
+              <li>按 <kbd>F12</kbd> → <b>Network / 网络</b>，刷新页面。</li>
+              <li>点任意请求，在 <b>Request Headers</b> 找到 <b>Cookie</b>，复制整段。</li>
+              <li>确认包含 <code>MUSIC_U</code> 和 <code>__csrf</code>，粘贴到上方。</li>
+            </ol>
+          </details>
+        </div>
+
+        <div class="card">
+          <div class="card-kicker">STEP 02</div>
+          <h3>选择目标播客</h3>
+          <div class="podcast-list" id="podcastList">
+            <div class="empty compact">连接后显示你正在管理的播客。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card upload-card">
+        <div class="card-kicker">STEP 03</div>
+        <div class="upload-card-head">
+          <h3>上传音频</h3>
+          <span class="hint">支持 mp3 / flac / wav / m4a / aac / ogg，最大 <b id="maxUploadLabel">500MB</b></span>
+        </div>
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="选择或拖入音频文件">
+          <input type="file" id="audioFile" accept=".mp3,.flac,.wav,.m4a,.aac,.ogg,audio/*" hidden>
+          <div class="drop-icon">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <p><b>点击选择</b> 或把音频拖到这里</p>
+          <span id="fileHint">MP3 会直接上传，其他格式自动转码</span>
+        </div>
+        <div class="form-grid">
+          <label class="field-label">节目标题
+            <input id="podcastTitle" type="text" maxlength="100" placeholder="默认使用文件名">
+          </label>
+          <label class="field-label">节目简介
+            <textarea id="podcastDesc" rows="3" maxlength="2000" placeholder="写一段本期介绍（可选）"></textarea>
+          </label>
+        </div>
+        <label class="switch-row">
+          <input id="autoPublish" type="checkbox">
+          <span class="switch" aria-hidden="true"></span>
+          <span>上传后自动发布 <em>关闭时保存为私密 / 未发布，可稍后到创作中心发布</em></span>
+        </label>
+        <div class="local-upload" id="localUpload" hidden>
+          <div class="bar"><span id="localUploadBar"></span></div>
+          <span id="localUploadText">正在传到本地服务…</span>
+        </div>
+        <button class="btn btn-primary btn-block btn-lg" type="button" id="uploadBtn">上传到所选播客</button>
+      </div>
+
+      <section class="jobs-block" aria-labelledby="uploadJobsTitle">
+        <div class="section-title">
+          <h3 id="uploadJobsTitle">上传任务</h3>
+          <span class="count-pill" id="uploadJobCount">0</span>
+        </div>
+        <div class="job-list" id="uploadJobs"><div class="empty">上传进度会显示在这里。</div></div>
+      </section>
+    </section>
+
+    <section class="help" id="help" aria-labelledby="helpTitle">
+      <div class="section-title"><h3 id="helpTitle">本地运行说明</h3></div>
+      <div class="help-grid">
+        <article class="help-card"><span>01</span><h4>手机 / 平板访问</h4><p>双击 <code>start-lan.bat</code>，让手机与电脑连同一 Wi-Fi，打开窗口里显示的局域网地址。</p></article>
+        <article class="help-card"><span>02</span><h4>ffmpeg 必需</h4><p>MP4 合并与 MP3 转码依赖 ffmpeg。页面顶部状态会显示是否就绪，未安装时请先加入 PATH。</p></article>
+        <article class="help-card"><span>03</span><h4>只处理授权内容</h4><p>请仅下载本人拥有版权或已获授权的素材；上传与发布行为需遵守平台条款，账号风险由使用者承担。</p></article>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div><span class="footer-dot"></span> 数据留在本地 · 无云端账号 · 无 AI Key</div>
+      <div>声取 MediaDock v1.0</div>
+    </footer>
+  </main>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+</body>
+</html>

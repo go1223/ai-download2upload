@@ -1,0 +1,4 @@
+Flask>=3.0,<4
+requests>=2.31
+yt-dlp>=2025.1.1
+pycryptodome>=3.20
